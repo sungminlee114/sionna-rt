@@ -16,6 +16,21 @@ from sionna.rt import Scene
 from sionna.rt.utils import cpx_mul, cpx_abs_square, r_hat, sinc, cpx_convert,\
     map_angle_to_canonical_range
 
+def filter_rxdata_with_associated_tx(array, associated_tx_idxs):
+    "Assumption: rx idx is at the 1st dimension, tx idx is at the 3rd dimension"
+    num_rx = array.shape[0]
+    results = []
+    
+    for rx_idx in range(num_rx):
+        tx_idx = associated_tx_idxs[rx_idx]
+        # 각 RX별로 하나의 TX만 선택
+        selected = array[rx_idx:rx_idx+1, :, tx_idx:tx_idx+1, ...]
+        
+        results.append(selected)
+    
+        # Concatenate along RX axis
+    return dr.concat(results, axis=0)
+
 class Paths:
     # pylint: disable=line-too-long
     r"""
@@ -386,6 +401,7 @@ class Paths:
 
     def cir(self, *,
         sampling_frequency: float = 1.,
+        associated_tx_idxs: list[int] | None = None,
         num_time_steps: int = 1,
         normalize_delays: bool = True,
         reverse_direction: bool = False,
@@ -412,6 +428,8 @@ class Paths:
 
         :param sampling_frequency: Frequency [Hz] at which the channel impulse
             response is sampled
+        
+        :param associated_tx_idxs: List of length num_rx containing, for each RX, the associated TX index
 
         :param num_time_steps: Number of time steps
 
@@ -519,6 +537,11 @@ class Paths:
             exp = (cos_phase, sin_phase)
             a = cpx_mul(a, exp)
 
+        if associated_tx_idxs is not None:
+            a[0] = filter_rxdata_with_associated_tx(a[0], associated_tx_idxs)
+            a[1] = filter_rxdata_with_associated_tx(a[1], associated_tx_idxs)
+            tau = filter_rxdata_with_associated_tx(tau, associated_tx_idxs)
+        
         if out_type == "drjit":
             return a, tau
         return cpx_convert(a, out_type), getattr(tau, out_type)()
@@ -528,6 +551,7 @@ class Paths:
         l_min: int,
         l_max: int,
         sampling_frequency: float | None = None,
+        associated_tx_idxs: list[int] | None = None,
         num_time_steps: int = 1,
         normalize: bool = False,
         normalize_delays: bool = True,
@@ -570,6 +594,8 @@ class Paths:
             response is sampled. If set to `None`, the ``bandwidth`` is used
             instead.
 
+        :param associated_tx_idxs: List of length num_rx containing, for each RX, the associated TX index
+
         :param num_time_steps: Number of time steps
 
         :param normalize: If set to `True`, the channel is normalized such that
@@ -604,7 +630,8 @@ class Paths:
         a, tau = self.cir(sampling_frequency=sampling_frequency,
                           num_time_steps=num_time_steps,
                           normalize_delays=normalize_delays,
-                          reverse_direction=reverse_direction)
+                          reverse_direction=reverse_direction,
+                          associated_tx_idxs=associated_tx_idxs)
 
         # If no paths, then return immediately
         if tau.shape[-1] == 0:
@@ -657,8 +684,11 @@ class Paths:
             return h
         return cpx_convert(h, out_type)
 
+
+
     def cfr(self,
         frequencies: mi.Float,
+        associated_tx_idxs: list[int] | None = None,
         sampling_frequency: float = 1.,
         num_time_steps: int = 1,
         normalize_delays: bool = True,
@@ -686,6 +716,10 @@ class Paths:
         :param frequencies: Frequencies [Hz] at which to compute the
             channel response
 
+        :param associated_tx_idxs: List of length num_rx containing, for each RX,
+            the index of the associated TX. If set to None, all TXs are considered.
+            This can be obtained from sample_positions method of the radio map.
+        
         :param sampling_frequency: Frequency [Hz] at which the channel impulse
             response is sampled
 
@@ -723,6 +757,7 @@ class Paths:
 
         # Get complex baseband equivalent CIR
         a, tau_ = self.cir(sampling_frequency=sampling_frequency,
+                           associated_tx_idxs=associated_tx_idxs,
                            num_time_steps=num_time_steps,
                            normalize_delays=normalize_delays,
                            reverse_direction=reverse_direction)
